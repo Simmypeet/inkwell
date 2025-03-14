@@ -9,15 +9,16 @@ use llvm_sys::core::LLVMGetTypeByName;
 
 use llvm_sys::core::{
     LLVMAddFunction, LLVMAddGlobal, LLVMAddGlobalInAddressSpace, LLVMAddNamedMetadataOperand, LLVMCloneModule,
-    LLVMDisposeModule, LLVMDumpModule, LLVMGetFirstFunction, LLVMGetFirstGlobal, LLVMGetLastFunction,
-    LLVMGetLastGlobal, LLVMGetModuleContext, LLVMGetModuleIdentifier, LLVMGetNamedFunction, LLVMGetNamedGlobal,
-    LLVMGetNamedMetadataNumOperands, LLVMGetNamedMetadataOperands, LLVMGetTarget, LLVMPrintModuleToFile,
-    LLVMPrintModuleToString, LLVMSetDataLayout, LLVMSetModuleIdentifier, LLVMSetTarget, LLVMDisposeMessage
+    LLVMDisposeMessage, LLVMDisposeModule, LLVMDumpModule, LLVMGetFirstFunction, LLVMGetFirstGlobal,
+    LLVMGetLastFunction, LLVMGetLastGlobal, LLVMGetModuleContext, LLVMGetModuleIdentifier, LLVMGetNamedFunction,
+    LLVMGetNamedGlobal, LLVMGetNamedMetadataNumOperands, LLVMGetNamedMetadataOperands, LLVMGetTarget,
+    LLVMPrintModuleToFile, LLVMPrintModuleToString, LLVMSetDataLayout, LLVMSetModuleIdentifier, LLVMSetTarget,
 };
 #[llvm_versions(7..)]
 use llvm_sys::core::{LLVMAddModuleFlag, LLVMGetModuleFlag};
 #[llvm_versions(13..)]
 use llvm_sys::error::LLVMGetErrorMessage;
+#[cfg(feature = "execution-engine")]
 use llvm_sys::execution_engine::{
     LLVMCreateExecutionEngineForModule, LLVMCreateInterpreterForModule, LLVMCreateJITCompilerForModule,
 };
@@ -35,7 +36,6 @@ use std::marker::PhantomData;
 use std::mem::{forget, MaybeUninit};
 use std::path::Path;
 use std::ptr;
-use std::rc::Rc;
 
 #[llvm_versions(7..)]
 use crate::comdat::Comdat;
@@ -43,19 +43,27 @@ use crate::context::{AsContextRef, Context, ContextRef};
 use crate::data_layout::DataLayout;
 #[llvm_versions(7..)]
 use crate::debug_info::{DICompileUnit, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder};
-use crate::execution_engine::ExecutionEngine;
 use crate::memory_buffer::MemoryBuffer;
 #[llvm_versions(13..)]
 use crate::passes::PassBuilderOptions;
 use crate::support::{to_c_str, LLVMString};
 #[llvm_versions(13..)]
 use crate::targets::TargetMachine;
-use crate::targets::{InitializationConfig, Target, TargetTriple};
-use crate::types::{AsTypeRef, BasicType, FunctionType, StructType};
+use crate::targets::TargetTriple;
+use crate::types::StructType;
+use crate::types::{AsTypeRef, BasicType, FunctionType};
 #[llvm_versions(7..)]
 use crate::values::BasicValue;
 use crate::values::{AsValueRef, FunctionValue, GlobalValue, MetadataValue};
-use crate::{AddressSpace, OptimizationLevel};
+use crate::AddressSpace;
+#[cfg(feature = "execution-engine")]
+use crate::{
+    execution_engine::ExecutionEngine,
+    targets::{InitializationConfig, Target},
+    OptimizationLevel,
+};
+#[cfg(feature = "execution-engine")]
+use std::rc::Rc;
 
 #[llvm_enum(LLVMLinkage)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -168,6 +176,7 @@ pub enum Linkage {
 pub struct Module<'ctx> {
     data_layout: RefCell<Option<DataLayout>>,
     pub(crate) module: Cell<LLVMModuleRef>,
+    #[cfg(feature = "execution-engine")]
     pub(crate) owned_by_ee: RefCell<Option<ExecutionEngine<'ctx>>>,
     _marker: PhantomData<&'ctx Context>,
 }
@@ -183,6 +192,7 @@ impl<'ctx> Module<'ctx> {
 
         Module {
             module: Cell::new(module),
+            #[cfg(feature = "execution-engine")]
             owned_by_ee: RefCell::new(None),
             data_layout: RefCell::new(Some(Module::get_borrowed_data_layout(module))),
             _marker: PhantomData,
@@ -457,6 +467,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(module.get_context(), context);
     /// ```
     // SubType: ExecutionEngine<Basic?>
+    #[cfg(feature = "execution-engine")]
     pub fn create_execution_engine(&self) -> Result<ExecutionEngine<'ctx>, LLVMString> {
         Target::initialize_native(&InitializationConfig::default()).map_err(|mut err_string| {
             err_string.push('\0');
@@ -511,6 +522,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(module.get_context(), context);
     /// ```
     // SubType: ExecutionEngine<Interpreter>
+    #[cfg(feature = "execution-engine")]
     pub fn create_interpreter_execution_engine(&self) -> Result<ExecutionEngine<'ctx>, LLVMString> {
         Target::initialize_native(&InitializationConfig::default()).map_err(|mut err_string| {
             err_string.push('\0');
@@ -567,6 +579,7 @@ impl<'ctx> Module<'ctx> {
     /// assert_eq!(module.get_context(), context);
     /// ```
     // SubType: ExecutionEngine<Jit>
+    #[cfg(feature = "execution-engine")]
     pub fn create_jit_execution_engine(
         &self,
         opt_level: OptimizationLevel,
@@ -1295,9 +1308,12 @@ impl<'ctx> Module<'ctx> {
     /// assert!(module.link_in_module(module2).is_ok());
     /// ```
     pub fn link_in_module(&self, other: Self) -> Result<(), LLVMString> {
-        if other.owned_by_ee.borrow().is_some() {
-            let string = "Cannot link a module which is already owned by an ExecutionEngine.\0";
-            return Err(LLVMString::create_from_str(string));
+        #[cfg(feature = "execution-engine")]
+        {
+            if other.owned_by_ee.borrow().is_some() {
+                let string = "Cannot link a module which is already owned by an ExecutionEngine.\0";
+                return Err(LLVMString::create_from_str(string));
+            }
         }
 
         use crate::support::error_handling::get_error_str_diagnostic_handler;
@@ -1539,13 +1555,18 @@ impl Clone for Module<'_> {
 // which is why DataLayout must be called with `new_borrowed`
 impl Drop for Module<'_> {
     fn drop(&mut self) {
+        // Context & EE will drop naturally if they are unique references at this point
+        #[cfg(feature = "execution-engine")]
         if self.owned_by_ee.borrow_mut().take().is_none() {
             unsafe {
                 LLVMDisposeModule(self.module.get());
             }
         }
 
-        // Context & EE will drop naturally if they are unique references at this point
+        #[cfg(not(feature = "execution-engine"))]
+        unsafe {
+            LLVMDisposeModule(self.module.get());
+        }
     }
 }
 

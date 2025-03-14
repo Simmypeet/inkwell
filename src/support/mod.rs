@@ -42,6 +42,7 @@ impl LLVMString {
     }
 
     /// This method will allocate a c string through LLVM
+    #[allow(dead_code)]
     pub(crate) fn create_from_str(string: &str) -> LLVMString {
         debug_assert_eq!(string.as_bytes()[string.as_bytes().len() - 1], 0);
 

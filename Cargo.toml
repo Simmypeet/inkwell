@@ -94,6 +94,7 @@ llvm18-0-prefer-static = ["llvm18-0", "llvm-sys-180/prefer-static"]
 # Don't force linking to libffi on non-windows platforms. Without this feature
 # inkwell always links to libffi on non-windows platforms.
 no-libffi-linking = []
+execution-engine = []
 target-x86 = []
 target-arm = []
 target-mips = []
@@ -159,7 +160,9 @@ once_cell = "1.16"
 thiserror = "1.0.48"
 
 static-alloc = { version = "0.2", optional = true }
-serde = { version = "1.0", default-features = false, features = ["derive"], optional = true }
+serde = { version = "1.0", default-features = false, features = [
+    "derive",
+], optional = true }
 
 [dev-dependencies]
 regex = "1"

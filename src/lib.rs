@@ -30,6 +30,7 @@ pub mod context;
 pub mod data_layout;
 #[cfg(not(any(feature = "llvm4-0", feature = "llvm5-0", feature = "llvm6-0")))]
 pub mod debug_info;
+#[cfg(feature = "execution-engine")]
 pub mod execution_engine;
 pub mod intrinsics;
 pub mod memory_buffer;
